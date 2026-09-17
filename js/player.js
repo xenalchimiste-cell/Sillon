@@ -350,6 +350,9 @@ export class Player extends EventTarget {
 
   // Démarre la source sur la platine libre, puis fond l'ancienne
   async startOnSpare(source, transition) {
+    // Écran verrouillé ou app en arrière-plan : on reste sur le même lecteur, celui que
+    // contrôle l'écran verrouillé (un autre lecteur pourrait être refusé ou perdre les commandes)
+    if (document.hidden && transition !== 'crossfade') return this.startOnSame(source);
     const old = this.audio;
     const deck = this.spare;
     const oldAudible = !old.paused && old.getAttribute('src') && old.src !== this.silentUrl;
@@ -392,6 +395,26 @@ export class Player extends EventTarget {
     if (oldAudible) this.fadeOutAndStop(old, crossfade || SWITCH_FADE_OUT);
     else if (old !== deck) old.pause();
     if (fadeIn) this.ramp(deck, 1, fadeIn);
+  }
+
+  async startOnSame(source) {
+    const deck = this.audio;
+    const spare = this.spare;
+    clearInterval(spare.rampTimer);
+    spare.pause();
+    clearInterval(deck.rampTimer);
+    if (deck.objectUrl && deck.objectUrl !== source.url) URL.revokeObjectURL(deck.objectUrl);
+    deck.objectUrl = source.revoke ? source.url : null;
+    deck.src = source.url;
+    deck.gain = 1;
+    deck.volume = this.volume;
+    try {
+      await deck.play();
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      this.setPlaying(false);
+      if (err.name === 'NotAllowedError') this.emit('blocked');
+    }
   }
 
   skipAfterError() {
@@ -518,8 +541,10 @@ export class Player extends EventTarget {
     set('previoustrack', () => this.prev());
     set('nexttrack', () => this.next());
     set('seekto', (e) => this.seek(e.seekTime));
-    set('seekbackward', () => this.seek(Math.max(0, this.position - 10)));
-    set('seekforward', () => this.seek(this.position + 10));
+    // Pas d'actions « reculer/avancer de 10 s » : sinon l'écran verrouillé les affiche
+    // à la place des boutons titre précédent / suivant
+    set('seekbackward', null);
+    set('seekforward', null);
     this.addEventListener('time', () => {
       const d = this.duration;
       if (!d || !ms.setPositionState) return;
