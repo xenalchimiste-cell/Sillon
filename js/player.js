@@ -91,15 +91,23 @@ export class Player extends EventTarget {
 
   // À appeler pendant un toucher : Safari n'autorise ensuite la lecture sur ces éléments
   // même si le fichier met du temps à être prêt (lecture en mémoire, téléchargement).
+  //
+  // Une seule tentative, avant la toute première lecture : ne jamais relancer le son muet
+  // ensuite, sinon sur iPhone (un seul son à la fois) il coupe la musique en cours.
   unlock() {
-    if (this.unlocked || this.unlocking) return;
-    const idle = this.decks.filter((a) => !a.getAttribute('src') || a.src === this.silentUrl);
-    if (!idle.length) { this.unlocked = true; return; }
-    this.unlocking = true;
-    Promise.all(idle.map((a) => { a.src = this.silentUrl; return a.play(); }))
-      .then(() => { this.unlocked = true; })
-      .catch(() => {}) // pas un geste valable (ex. début d'un toucher) : on réessaiera au suivant
-      .finally(() => { this.unlocking = false; });
+    if (this.unlocked) return;
+    if (this.decks.some((a) => a.getAttribute('src') && a.src !== this.silentUrl)) {
+      this.unlocked = true;
+      return;
+    }
+    // Le navigateur sait dire si ce toucher autorise le son : sinon on attend le suivant
+    if (navigator.userActivation && !navigator.userActivation.isActive) return;
+    this.unlocked = true;
+    const targets = this.canFade ? this.decks : [this.audio];
+    targets.forEach((a) => {
+      a.src = this.silentUrl;
+      a.play().catch(() => {});
+    });
   }
 
   get current() { return this.pos >= 0 ? this.getTrack(this.queue[this.order[this.pos]]) : null; }
@@ -352,7 +360,8 @@ export class Player extends EventTarget {
   async startOnSpare(source, transition) {
     // Écran verrouillé ou app en arrière-plan : on reste sur le même lecteur, celui que
     // contrôle l'écran verrouillé (un autre lecteur pourrait être refusé ou perdre les commandes)
-    if (document.hidden && transition !== 'crossfade') return this.startOnSame(source);
+    // Sans réglage du volume (iPhone), pas de fondu : un seul lecteur suffit et évite les conflits
+    if (!this.canFade || (document.hidden && transition !== 'crossfade')) return this.startOnSame(source);
     const old = this.audio;
     const deck = this.spare;
     const oldAudible = !old.paused && old.getAttribute('src') && old.src !== this.silentUrl;

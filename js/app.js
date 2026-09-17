@@ -980,7 +980,8 @@ player.addEventListener('time', () => {
 player.addEventListener('error', (e) => toast(e.detail.message, { error: true, timeout: 7000 }));
 player.addEventListener('blocked', () => toast('Touche le bouton lecture pour lancer le son.', { timeout: 5000 }));
 // Débloque le son dès le premier toucher (exigence de Safari sur iPhone)
-['pointerdown', 'touchend', 'keydown'].forEach((type) => document.addEventListener(type, () => player.unlock(), { capture: true, passive: true }));
+// (seuls ces événements comptent comme un vrai geste pour autoriser le son)
+['touchend', 'click', 'keydown'].forEach((type) => document.addEventListener(type, () => player.unlock(), { capture: true, passive: true }));
 player.addEventListener('loading', (e) => document.body.classList.toggle('is-loading', e.detail.loading));
 player.addEventListener('volume', renderVolume);
 
@@ -1913,6 +1914,20 @@ async function start() {
     navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Service worker', err));
   }
 }
+
+// Toute erreur imprévue est affichée : une panne silencieuse est impossible à diagnostiquer
+let lastErrorToast = 0;
+function reportUnexpected(message) {
+  if (!message || Date.now() - lastErrorToast < 4000) return;
+  lastErrorToast = Date.now();
+  toast(`Erreur inattendue : ${message}`, { error: true, timeout: 9000 });
+}
+window.addEventListener('error', (e) => reportUnexpected(e.message));
+window.addEventListener('unhandledrejection', (e) => {
+  const reason = e.reason;
+  if (reason?.name === 'AbortError' || reason?.name === 'NotAllowedError') return;
+  reportUnexpected(reason?.message || String(reason));
+});
 
 // Outils de diagnostic : ouvrir le site avec ?debug
 if (new URLSearchParams(location.search).has('debug')) window.sillon = { player, lib };
