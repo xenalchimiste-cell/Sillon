@@ -167,6 +167,8 @@ function sortedPlaylists() {
 const player = new Player({
   getTrack: (id) => lib.tracks.get(id),
   artFor: coverSrc,
+  crossfade: () => prefs.get('crossfade', 5),
+  canPlay: (t) => Boolean(t) && isPlayable(t),
   resolve: async (t) => {
     const fileKey = localFileFor(t);
     let missing = null;
@@ -276,6 +278,8 @@ const sheet = $('#sheet');
 let sheetActions = {};
 
 function openSheet(title, body, actions = {}) {
+  clearTimeout(sheetCloseTimer);
+  sheet.classList.remove('is-closing');
   sheetActions = actions;
   sheet.innerHTML = `
     <div class="sheet-panel">
@@ -290,9 +294,13 @@ function openSheet(title, body, actions = {}) {
   if (first) first.focus();
 }
 
+let sheetCloseTimer = 0;
 function closeSheet() {
-  if (sheet.open) sheet.close();
   sheetActions = {};
+  if (!sheet.open || sheet.classList.contains('is-closing')) return;
+  if (REDUCED_MOTION.matches) { sheet.close(); return; }
+  sheet.classList.add('is-closing');
+  sheetCloseTimer = setTimeout(() => { sheet.classList.remove('is-closing'); sheet.close(); }, 200);
 }
 
 sheet.addEventListener('click', (e) => { if (e.target === sheet) closeSheet(); });
@@ -355,6 +363,7 @@ function monogram(name, cls = '') {
 }
 
 const colorCache = new Map();
+const colorValues = new Map(); // couleurs déjà calculées, utilisables sans attendre
 function ambientColor(src) {
   if (!src) return Promise.resolve(null);
   if (colorCache.has(src)) return colorCache.get(src);
@@ -382,6 +391,7 @@ function ambientColor(src) {
     img.src = src;
   });
   colorCache.set(src, p);
+  p.then((c) => { if (c) colorValues.set(src, c); });
   return p;
 }
 
@@ -634,6 +644,17 @@ const views = {
         </section>
 
         <section class="panel">
+          <h2 class="panel-title">${icon('play')} Lecture</h2>
+          <label class="field">
+            <span class="field-label">Fondu enchaîné entre les titres : <strong data-crossfade-label>${crossfadeLabel(prefs.get('crossfade', 5))}</strong></span>
+            <input class="range range-setting" type="range" min="0" max="12" step="1" value="${prefs.get('crossfade', 5)}" data-crossfade style="--p:${(prefs.get('crossfade', 5) / 12) * 100}%" ${player.canFade ? '' : 'disabled'}>
+          </label>
+          <p class="panel-hint">${player.canFade
+            ? 'Le titre suivant commence avant la fin du précédent, le volume passe progressivement de l’un à l’autre.'
+            : 'Le navigateur de cet appareil ne permet pas de régler le volume (iPhone) : les titres s’enchaînent directement, sans fondu.'}</p>
+        </section>
+
+        <section class="panel">
           <h2 class="panel-title">${icon('user')} Spotify</h2>
           ${spotify.isConnected() ? `
             <p class="panel-text">Connecté en tant que <strong>${esc(me?.name || '')}</strong>.</p>
@@ -666,6 +687,10 @@ const views = {
       </div>`;
   },
 };
+
+function crossfadeLabel(seconds) {
+  return Number(seconds) ? `${seconds} s` : 'désactivé';
+}
 
 function accountPanel() {
   const title = `<h2 class="panel-title">${icon('user')} Compte</h2>`;
@@ -786,13 +811,19 @@ function render({ keepScroll = false } = {}) {
 
   const tint = $('[data-tint-src]');
   if (tint?.dataset.tintSrc) {
-    ambientColor(tint.dataset.tintSrc).then((c) => { if (c && main.contains(tint)) tint.style.setProperty('--tint', c); });
+    const known = colorValues.get(tint.dataset.tintSrc);
+    if (known) tint.style.setProperty('--tint', known);
+    else ambientColor(tint.dataset.tintSrc).then((c) => { if (c && main.contains(tint)) tint.style.setProperty('--tint', c); });
   }
   syncPlayingState();
   renderSidebar();
 }
 
-window.addEventListener('hashchange', () => render());
+// Transition douce entre les pages (navigateurs compatibles)
+window.addEventListener('hashchange', () => {
+  if (!document.startViewTransition || REDUCED_MOTION.matches || document.hidden) return render();
+  document.startViewTransition(() => render());
+});
 
 function renderSidebar() {
   const pls = sortedPlaylists();
@@ -825,20 +856,27 @@ function renderPlayer() {
   syncPlayingState();
   const playIcon = player.playing ? 'pause' : 'play';
   $$('[data-action="toggle"]').forEach((b) => {
+    if (b.dataset.icon === playIcon) return;
+    const changed = Boolean(b.dataset.icon);
+    b.dataset.icon = playIcon;
     b.innerHTML = icon(playIcon);
     b.setAttribute('aria-label', player.playing ? 'Pause' : 'Lecture');
+    if (changed && !REDUCED_MOTION.matches) b.firstElementChild.animate([{ transform: 'scale(0.6)', opacity: 0.4 }, { transform: 'none', opacity: 1 }], { duration: 220, easing: 'cubic-bezier(0.2, 0.7, 0.2, 1)' });
   });
   $$('[data-action="shuffle"]').forEach((b) => { b.classList.toggle('is-on', player.shuffle); b.setAttribute('aria-pressed', player.shuffle); });
   $$('[data-action="repeat"]').forEach((b) => {
     b.classList.toggle('is-on', player.repeat !== 'off');
-    b.innerHTML = icon(player.repeat === 'one' ? 'repeat-one' : 'repeat');
+    const name = player.repeat === 'one' ? 'repeat-one' : 'repeat';
+    if (b.dataset.icon !== name) { b.dataset.icon = name; b.innerHTML = icon(name); }
     b.setAttribute('aria-label', { off: 'Répéter', all: 'Répéter la liste', one: 'Répéter le titre' }[player.repeat]);
   });
   if (!t) return;
 
   const src = coverSrc(t);
-  $$('[data-np="title"]').forEach((el) => { el.textContent = t.title || 'Sans titre'; });
-  $$('[data-np="artist"]').forEach((el) => { el.textContent = t.artist || 'Artiste inconnu'; });
+  const isNewTrack = t.id !== lastTrackId;
+  const animateText = isNewTrack && lastTrackId !== null && !REDUCED_MOTION.matches;
+  $$('[data-np="title"]').forEach((el) => swapText(el, t.title || 'Sans titre', animateText));
+  $$('[data-np="artist"]').forEach((el) => swapText(el, t.artist || 'Artiste inconnu', animateText));
   $$('[data-np="context"]').forEach((el) => { el.textContent = player.context?.name || ''; });
   $$('[data-np="mode"]').forEach((el) => {
     const label = { spotify: 'Lecture via Spotify', connect: `Lecture sur ${player.deviceName || 'l’app Spotify'}` }[player.mode] || '';
@@ -850,10 +888,11 @@ function renderPlayer() {
     b.classList.toggle('is-on', Boolean(t.liked));
     b.setAttribute('aria-pressed', Boolean(t.liked));
   });
-  if (t.id !== lastTrackId) {
+  if (isNewTrack) {
+    const first = lastTrackId === null;
     lastTrackId = t.id;
-    $$('[data-np="art"]').forEach((el) => { el.innerHTML = artHtml(src, `Pochette de ${t.album || t.title}`); });
-    $$('[data-np="backdrop"]').forEach((el) => { el.style.backgroundImage = src ? `url("${src}")` : ''; });
+    $$('[data-np="art"]').forEach((el) => swapLayer(el, artHtml(src, `Pochette de ${t.album || t.title}`), first ? 0 : player.direction));
+    $$('[data-np="backdrop"]').forEach((el) => swapLayer(el, src ? `<span class="np-backdrop-image" style="background-image:url('${esc(src)}')"></span>` : '', 0));
     document.title = `${t.title} · ${t.artist || 'Sillon'}`;
     ambientColor(src).then((c) => {
       if (player.current?.id !== t.id) return;
@@ -862,7 +901,58 @@ function renderPlayer() {
   }
   if (!ui.np.hidden) renderQueue();
   renderTime();
+  startProgressLoop();
 }
+
+const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)');
+
+// Change un texte en douceur (glisse vers le haut)
+function swapText(el, text, animate) {
+  if (el.textContent === text) return;
+  el.textContent = text;
+  if (animate && el.offsetParent) {
+    el.animate([{ opacity: 0, transform: 'translateY(0.45em)' }, { opacity: 1, transform: 'none' }], { duration: 380, easing: 'cubic-bezier(0.2, 0.7, 0.2, 1)' });
+  }
+}
+
+// Superpose le nouveau contenu (pochette, fond) et fait disparaître l'ancien en fondu
+function swapLayer(container, html, direction) {
+  const layer = document.createElement('span');
+  layer.className = 'swap-layer';
+  layer.innerHTML = html;
+  const previous = [...container.children];
+  const animate = previous.length && !REDUCED_MOTION.matches && container.offsetParent;
+  if (!animate) {
+    container.replaceChildren(layer);
+    return;
+  }
+  layer.classList.add('is-entering');
+  layer.style.setProperty('--dir', direction);
+  container.appendChild(layer);
+  const img = layer.querySelector('img');
+  const ready = img && !img.complete ? Promise.race([img.decode().catch(() => {}), new Promise((r) => setTimeout(r, 450))]) : Promise.resolve();
+  ready.then(() => requestAnimationFrame(() => {
+    layer.classList.remove('is-entering');
+    previous.forEach((old) => {
+      old.style.setProperty('--dir', direction);
+      old.classList.add('is-leaving');
+      setTimeout(() => old.remove(), 600);
+    });
+  }));
+}
+
+// Barre de progression fluide : mise à jour à chaque image pendant la lecture
+let progressFrame = 0;
+function progressLoop() {
+  progressFrame = 0;
+  if (!player.playing || document.hidden) return;
+  renderTime();
+  progressFrame = requestAnimationFrame(progressLoop);
+}
+function startProgressLoop() {
+  if (!progressFrame && player.playing && !document.hidden) progressFrame = requestAnimationFrame(progressLoop);
+}
+document.addEventListener('visibilitychange', startProgressLoop);
 
 let seeking = false;
 function renderTime() {
@@ -875,14 +965,16 @@ function renderTime() {
     input.style.setProperty('--p', `${ratio * 100}%`);
   });
   $$('[data-np="progress"]').forEach((el) => el.style.setProperty('--p', `${ratio * 100}%`));
-  if (!seeking) $$('[data-np="elapsed"]').forEach((el) => { el.textContent = fmt(p); });
-  $$('[data-np="duration"]').forEach((el) => { el.textContent = fmt(d); });
+  const elapsed = fmt(p);
+  const total = fmt(d);
+  if (!seeking) $$('[data-np="elapsed"]').forEach((el) => { if (el.textContent !== elapsed) el.textContent = elapsed; });
+  $$('[data-np="duration"]').forEach((el) => { if (el.textContent !== total) el.textContent = total; });
 }
 
 let timeFrame = 0;
 player.addEventListener('change', renderPlayer);
 player.addEventListener('time', () => {
-  if (timeFrame) return;
+  if (timeFrame || progressFrame) return;
   timeFrame = requestAnimationFrame(() => { timeFrame = 0; renderTime(); });
 });
 player.addEventListener('error', (e) => toast(e.detail.message, { error: true, timeout: 7000 }));
@@ -907,6 +999,11 @@ document.addEventListener('input', (e) => {
     $$('[data-np="elapsed"]').forEach((x) => { x.textContent = fmt(ratio * player.duration); });
   } else if (el.dataset.np === 'volume') {
     player.setVolume(el.value / 100);
+  } else if (el.dataset.crossfade !== undefined) {
+    const value = Number(el.value);
+    prefs.set('crossfade', value);
+    el.style.setProperty('--p', `${(value / 12) * 100}%`);
+    $$('[data-crossfade-label]').forEach((x) => { x.textContent = crossfadeLabel(value); });
   } else if (el.id === 'search-input') {
     runSearch(el.value);
   }
@@ -923,20 +1020,80 @@ document.addEventListener('change', (e) => {
   }
 });
 
+let lastInputWasKeyboard = false;
+document.addEventListener('keydown', () => { lastInputWasKeyboard = true; }, true);
+document.addEventListener('pointerdown', () => { lastInputWasKeyboard = false; }, true);
+
 function openNowPlaying() {
   if (!player.current) return;
   ui.np.hidden = false;
-  requestAnimationFrame(() => ui.np.classList.add('is-open'));
+  ui.np.style.transform = '';
+  requestAnimationFrame(() => requestAnimationFrame(() => ui.np.classList.add('is-open')));
   document.body.classList.add('np-open');
   renderQueue();
-  $('[data-action="np-close"]', ui.np).focus();
+  if (lastInputWasKeyboard) $('[data-action="np-close"]', ui.np).focus({ preventScroll: true });
 }
 
 function closeNowPlaying() {
-  ui.np.classList.remove('is-open');
+  ui.np.classList.remove('is-open', 'is-dragging');
+  ui.np.style.transform = '';
   document.body.classList.remove('np-open');
-  setTimeout(() => { if (!ui.np.classList.contains('is-open')) ui.np.hidden = true; }, 320);
+  setTimeout(() => { if (!ui.np.classList.contains('is-open')) ui.np.hidden = true; }, 420);
 }
+
+// Gestes sur téléphone : glisser la pochette pour changer de titre, tirer vers le bas pour fermer
+(function setupNowPlayingGestures() {
+  const stage = $('.np-stage', ui.np);
+  const cover = $('.np-cover', ui.np);
+  let start = null;
+
+  ui.np.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' || e.target.closest('button, input, a, .queue-list')) return;
+    start = { x: e.clientX, y: e.clientY, t: performance.now(), axis: null, onCover: stage.contains(e.target) };
+  });
+
+  ui.np.addEventListener('pointermove', (e) => {
+    if (!start) return;
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    if (!start.axis) {
+      if (Math.hypot(dx, dy) < 10) return;
+      start.axis = Math.abs(dx) > Math.abs(dy) && start.onCover ? 'x' : dy > 0 ? 'y' : 'none';
+      if (start.axis === 'x') cover.classList.add('is-dragging');
+      if (start.axis === 'y') ui.np.classList.add('is-dragging');
+    }
+    if (start.axis === 'x') {
+      cover.style.transform = `translateX(${dx}px) rotate(${dx / 40}deg)`;
+      cover.style.opacity = String(Math.max(0.35, 1 - Math.abs(dx) / 500));
+    } else if (start.axis === 'y') {
+      ui.np.style.transform = `translateY(${Math.max(0, dy)}px)`;
+    }
+  });
+
+  const end = (e) => {
+    if (!start) return;
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    const fast = performance.now() - start.t < 260;
+    const { axis } = start;
+    start = null;
+    if (axis === 'x') {
+      cover.classList.remove('is-dragging');
+      cover.style.transform = '';
+      cover.style.opacity = '';
+      if (Math.abs(dx) > 90 || (fast && Math.abs(dx) > 40)) {
+        if (dx < 0) player.next();
+        else player.prev();
+      }
+    } else if (axis === 'y') {
+      ui.np.classList.remove('is-dragging');
+      if (dy > 140 || (fast && dy > 60)) closeNowPlaying();
+      else ui.np.style.transform = '';
+    }
+  };
+  ui.np.addEventListener('pointerup', end);
+  ui.np.addEventListener('pointercancel', end);
+})();
 
 function renderQueue() {
   const list = $('#np-queue-list');
@@ -1756,5 +1913,8 @@ async function start() {
     navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Service worker', err));
   }
 }
+
+// Outils de diagnostic : ouvrir le site avec ?debug
+if (new URLSearchParams(location.search).has('debug')) window.sillon = { player, lib };
 
 start();
