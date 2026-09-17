@@ -23,6 +23,8 @@ function silentWavUrl() {
 
 // Sur iPhone, le volume d'un <audio> n'est pas réglable : pas de fondu possible
 const CAN_FADE = (() => { const a = new Audio(); a.volume = 0.5; return a.volume === 0.5; })();
+// iPhone/iPad (Safari, Chrome et apps installées utilisent le même moteur)
+const IS_IOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const SWITCH_FADE_OUT = 280; // changement de titre manuel
 const SWITCH_FADE_IN = 420;
 
@@ -62,7 +64,11 @@ export class Player extends EventTarget {
     a.preload = 'auto';
     a.volume = this.volume;
     const isActive = () => a === this.audio && a.src !== this.silentUrl;
-    a.addEventListener('play', () => { if (isActive()) this.setPlaying(true); });
+    a.addEventListener('play', () => {
+      if (!isActive()) return;
+      this.setPlaying(true);
+      this.registerMediaActions(); // iOS peut oublier les commandes quand la source change
+    });
     a.addEventListener('pause', () => { if (isActive()) this.setPlaying(false); });
     a.addEventListener('timeupdate', () => {
       if (!isActive()) return;
@@ -541,19 +547,32 @@ export class Player extends EventTarget {
     this.emit('time');
   }
 
-  setupMediaSession() {
+  // Commandes de l'écran verrouillé, du casque et de la notification
+  registerMediaActions() {
     if (!('mediaSession' in navigator)) return;
     const ms = navigator.mediaSession;
     const set = (action, fn) => { try { ms.setActionHandler(action, fn); } catch { /* non supporté */ } };
-    set('play', () => this.toggle());
-    set('pause', () => this.toggle());
+    set('play', () => { if (!this.playing) this.toggle(); });
+    set('pause', () => { if (this.playing) this.toggle(); });
     set('previoustrack', () => this.prev());
     set('nexttrack', () => this.next());
     set('seekto', (e) => this.seek(e.seekTime));
-    // Pas d'actions « reculer/avancer de 10 s » : sinon l'écran verrouillé les affiche
-    // à la place des boutons titre précédent / suivant
-    set('seekbackward', null);
-    set('seekforward', null);
+    if (IS_IOS) {
+      // L'écran verrouillé de l'iPhone affiche toujours « -10 s / +10 s » pour un site web :
+      // ces boutons changent donc de titre, comme dans une app de musique
+      set('seekbackward', () => this.prev());
+      set('seekforward', () => this.next());
+    } else {
+      // Ailleurs, sans ces actions, la notification affiche précédent / suivant
+      set('seekbackward', null);
+      set('seekforward', null);
+    }
+  }
+
+  setupMediaSession() {
+    if (!('mediaSession' in navigator)) return;
+    const ms = navigator.mediaSession;
+    this.registerMediaActions();
     this.addEventListener('time', () => {
       const d = this.duration;
       if (!d || !ms.setPositionState) return;
