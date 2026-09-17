@@ -3,6 +3,7 @@ import { readTags, guessFromFilename, probeDuration } from './tags.js';
 import * as deezer from './deezer.js';
 import * as spotify from './spotify.js';
 import { Player } from './player.js';
+import * as cloud from './cloud.js';
 
 /* ================= Utilitaires ================= */
 const $ = (s, r = document) => r.querySelector(s);
@@ -139,12 +140,14 @@ async function spotifyRoute() {
 async function saveTrack(t) {
   lib.tracks.set(t.id, t);
   await db.put('tracks', t);
+  cloud.touch('track', t.id);
 }
 
 async function savePlaylist(p) {
   p.updatedAt = Date.now();
   lib.playlists.set(p.id, p);
   await db.put('playlists', p);
+  cloud.touch('playlist', p.id);
 }
 
 function sortedPlaylists() {
@@ -158,7 +161,12 @@ const player = new Player({
   resolve: async (t) => {
     const fileKey = localFileFor(t);
     if (fileKey) {
-      const blob = await db.get('files', fileKey);
+      let blob = await db.get('files', fileKey);
+      // Fichier sauvegardé dans le compte mais pas encore sur cet appareil
+      if (!blob && cloud.currentUser()) {
+        blob = await cloud.downloadAudio(fileKey);
+        if (blob) await db.put('files', blob, fileKey).catch(() => {});
+      }
       if (blob) return { type: 'audio', url: URL.createObjectURL(blob), revoke: true, mode: 'full' };
     }
     if (t.source === 'url') return { type: 'audio', url: t.url, mode: 'full' };
@@ -588,6 +596,8 @@ const views = {
       <div class="page page-narrow">
         <header class="page-head"><h1 class="page-title">Réglages</h1></header>
 
+        ${accountPanel()}
+
         <section class="panel">
           <h2 class="panel-title">${icon('phone')} Installer l’app</h2>
           ${standalone ? '<p class="panel-text">Sillon est installée sur cet appareil.</p>'
@@ -631,15 +641,50 @@ const views = {
   },
 };
 
+function accountPanel() {
+  const title = `<h2 class="panel-title">${icon('user')} Compte</h2>`;
+  if (!cloud.isConfigured()) {
+    return `<section class="panel">${title}
+      <p class="panel-text">Les comptes ne sont pas encore activés sur ce site. Suis la partie « Comptes » du fichier README pour relier Sillon à Supabase.</p></section>`;
+  }
+  if (!cloud.isReady()) {
+    return `<section class="panel">${title}<p class="panel-text">${navigator.onLine ? 'Connexion au service de comptes…' : 'Connecte-toi à internet pour accéder à ton compte.'}</p></section>`;
+  }
+  const u = cloud.currentUser();
+  if (u) {
+    return `<section class="panel">${title}
+      <p class="panel-text">Connecté avec <strong>${esc(u.email)}</strong>. Tes playlists, titres likés et fichiers audio sont sauvegardés dans ton compte : connecte-toi sur un autre appareil pour les retrouver.</p>
+      <p class="sync-line" data-sync-status>${esc(syncText())}</p>
+      <div class="panel-actions">
+        <button class="btn btn-primary" data-action="sync-now">Synchroniser maintenant</button>
+        <button class="btn btn-ghost" data-action="sign-out">Se déconnecter</button>
+      </div></section>`;
+  }
+  return `<section class="panel">${title}
+    <p class="panel-text">Crée un compte pour sauvegarder tes musiques et les retrouver sur tous tes appareils.</p>
+    <form class="form" data-form="auth">
+      <label class="field"><span class="field-label">E-mail</span>
+        <input class="input" name="email" type="email" autocomplete="email" inputmode="email" required></label>
+      <label class="field"><span class="field-label">Mot de passe (6 caractères minimum)</span>
+        <input class="input" name="password" type="password" autocomplete="current-password" minlength="6" required></label>
+      <div class="panel-actions">
+        <button class="btn btn-primary" name="mode" value="signin">Se connecter</button>
+        <button class="btn btn-ghost" name="mode" value="signup">Créer un compte</button>
+      </div>
+      <button type="button" class="link auth-forgot" data-action="forgot-password">Mot de passe oublié ?</button>
+    </form></section>`;
+}
+
 function onboardingView() {
   return `
     <div class="page onboarding">
       <div class="onboarding-mark" aria-hidden="true"><span class="brand-mark brand-mark-big"></span></div>
       <h1 class="onboarding-title">Ta musique, sans pub, dans ta poche.</h1>
-      <p class="onboarding-text">Commence par ajouter des morceaux. Tout reste sur cet appareil.</p>
+      <p class="onboarding-text">${cloud.isConfigured() ? 'Ajoute tes morceaux, ou connecte-toi pour retrouver ta bibliothèque.' : 'Commence par ajouter des morceaux. Tout reste sur cet appareil.'}</p>
       <div class="onboarding-actions">
         <button class="choice" data-action="pick-files">${icon('note')}<span><strong>Mes fichiers audio</strong><small>MP3, FLAC, M4A… lus en entier</small></span></button>
         <a class="choice" href="#/import">${icon('link')}<span><strong>Un lien Deezer ou Spotify</strong><small>Playlist, album ou profil</small></span></a>
+        ${cloud.isConfigured() ? `<a class="choice" href="#/settings">${icon('user')}<span><strong>J’ai déjà un compte</strong><small>Retrouver mes musiques sur cet appareil</small></span></a>` : ''}
       </div>
       <a class="link onboarding-settings" href="#/settings">Installer l’app sur ce téléphone</a>
     </div>`;
@@ -885,6 +930,18 @@ let pendingAttachId = null;
 
 const actions = {
   'sheet-close': closeSheet,
+  'sync-now': () => cloud.run(),
+  'sign-out': async () => {
+    try { await cloud.signOut(); } catch (err) { toast(err.message, { error: true }); }
+  },
+  'forgot-password': async (el) => {
+    const email = el.closest('form')?.email.value.trim();
+    if (!email) return toast('Saisis d’abord ton adresse e-mail.');
+    try {
+      await cloud.resetPassword(email);
+      toast(`Si un compte existe pour ${email}, un e-mail vient d’être envoyé pour choisir un nouveau mot de passe.`, { timeout: 9000 });
+    } catch (err) { toast(err.message, { error: true }); }
+  },
   toggle: () => player.toggle(),
   next: () => player.next(),
   prev: () => player.prev(),
@@ -922,8 +979,14 @@ const actions = {
     document.body.classList.remove('can-install');
     if (outcome === 'accepted') toast('Sillon est installée.');
   },
-  wipe: () => confirmSheet('Tout effacer ?', 'Tes fichiers importés, playlists et titres likés seront supprimés de cet appareil. Cette action est définitive.', 'Tout effacer', async () => {
+  wipe: () => confirmSheet(
+    cloud.currentUser() ? 'Effacer cet appareil ?' : 'Tout effacer ?',
+    cloud.currentUser()
+      ? 'Tes musiques et playlists seront supprimées de cet appareil uniquement. Elles restent dans ton compte et reviendront à la prochaine synchronisation.'
+      : 'Tes fichiers importés, playlists et titres likés seront supprimés de cet appareil. Cette action est définitive.',
+    'Effacer', async () => {
     player.stopAudio();
+    cloud.forgetDevice();
     await Promise.all(['tracks', 'playlists', 'files', 'covers'].map((s) => db.clear(s)));
     lib.tracks.clear(); lib.playlists.clear(); lib.covers.clear(); reindex();
     location.hash = '#/';
@@ -963,6 +1026,24 @@ document.addEventListener('submit', async (e) => {
   if (form.dataset.form === 'link') {
     const ok = await runImport(() => importLink(data.get('link')));
     if (ok) form.reset();
+  } else if (form.dataset.form === 'auth') {
+    const mode = e.submitter?.value || 'signin';
+    const email = String(data.get('email')).trim();
+    const password = String(data.get('password'));
+    const buttons = $$('button', form);
+    buttons.forEach((b) => { b.disabled = true; });
+    try {
+      if (mode === 'signup') {
+        const { needsConfirmation } = await cloud.signUp(email, password);
+        if (needsConfirmation) toast(`Compte créé. Ouvre le lien envoyé à ${email} pour l’activer, puis connecte-toi ici.`, { timeout: 12000 });
+      } else {
+        await cloud.signIn(email, password);
+      }
+    } catch (err) {
+      toast(err.message, { error: true, timeout: 7000 });
+    } finally {
+      buttons.forEach((b) => { b.disabled = false; });
+    }
   } else if (form.dataset.form === 'client-id') {
     spotify.setClientId(data.get('clientId'));
     spotifyLogin();
@@ -1022,9 +1103,11 @@ async function deleteTracks(ids) {
     if (p.trackIds.some((x) => set.has(x))) await savePlaylist({ ...p, trackIds: p.trackIds.filter((x) => !set.has(x)) });
   }
   const fileKeys = ids.map((id) => lib.tracks.get(id)?.fileKey).filter(Boolean);
+  const cloudKeys = ids.map((id) => lib.tracks.get(id)).filter((t) => t?.cloudFile).map((t) => t.fileKey);
   await db.deleteMany('files', fileKeys);
   await db.deleteMany('tracks', ids);
-  ids.forEach((id) => lib.tracks.delete(id));
+  ids.forEach((id) => { lib.tracks.delete(id); cloud.touch('track', id); });
+  cloud.removeAudio(cloudKeys);
   reindex();
 }
 
@@ -1076,6 +1159,7 @@ function playlistMenu(id) {
     'pm-delete': () => confirmSheet('Supprimer la playlist ?', `« ${p.name} » sera supprimée. Les titres restent dans ta bibliothèque.`, 'Supprimer', async () => {
       lib.playlists.delete(id);
       await db.delete('playlists', id);
+      cloud.touch('playlist', id);
       toast('Playlist supprimée.');
       location.hash = '#/';
       render();
@@ -1224,7 +1308,7 @@ attachInput.addEventListener('change', async () => {
   if (!file || !t) return;
   const fileKey = t.fileKey || `f${t.id}`;
   await db.put('files', new Blob([file], { type: file.type || 'audio/mpeg' }), fileKey);
-  await saveTrack({ ...t, fileKey, fileName: file.name, fileSize: file.size });
+  await saveTrack({ ...t, fileKey, fileName: file.name, fileSize: file.size, cloudFile: false, cloudSkip: undefined });
   reindex();
   toast(`Version complète associée à « ${t.title} ».`);
   render({ keepScroll: true });
@@ -1267,7 +1351,10 @@ function upsertRemote(tracks) {
     toSave.push(t);
     return t.id;
   });
-  return db.putMany('tracks', toSave).then(() => [...new Set(ids)]);
+  return db.putMany('tracks', toSave).then(() => {
+    toSave.forEach((t) => cloud.touch('track', t.id));
+    return [...new Set(ids)];
+  });
 }
 
 async function saveImportedPlaylist(data, source) {
@@ -1411,6 +1498,195 @@ async function updateStorageInfo() {
   el.textContent = text;
 }
 
+/* ================= Compte & synchronisation ================= */
+let syncState = { state: 'idle' };
+let uploadToast = null;
+
+function syncText() {
+  if (!cloud.currentUser()) return '';
+  const { state, done, total, message } = syncState;
+  if (state === 'sync') return 'Synchronisation en cours…';
+  if (state === 'upload' && done < total) return `Envoi des fichiers : ${done + 1} sur ${total}`;
+  if (state === 'error') return `Synchronisation impossible (${message}). Nouvel essai automatique.`;
+  const last = cloud.lastSync();
+  return last ? `À jour, dernière synchronisation à ${new Date(last).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}` : 'Pas encore synchronisé.';
+}
+
+function onSyncStatus(next) {
+  if (next.state === 'warning') { toast(next.message, { timeout: 8000 }); return; }
+  syncState = next;
+  if (next.state === 'upload') {
+    if (next.done < next.total) {
+      const text = `Sauvegarde dans ton compte : ${next.done + 1} sur ${next.total}`;
+      if (uploadToast) uploadToast.update(text); else uploadToast = toast(text, { timeout: 0 });
+    } else if (uploadToast) {
+      uploadToast.done('Fichiers sauvegardés dans ton compte.');
+      uploadToast = null;
+    }
+  } else if (next.state === 'error' && uploadToast) {
+    uploadToast.close();
+    uploadToast = null;
+  }
+  $$('[data-sync-status]').forEach((el) => { el.textContent = syncText(); });
+  $('#account-chip')?.classList.toggle('is-error', next.state === 'error');
+  $('#account-chip')?.classList.toggle('is-busy', next.state === 'sync' || next.state === 'upload');
+}
+
+function renderAccountChip() {
+  const chip = $('#account-chip');
+  if (!chip) return;
+  chip.hidden = !cloud.isConfigured();
+  const u = cloud.currentUser();
+  chip.innerHTML = u
+    ? `<span class="avatar" aria-hidden="true">${esc((u.email || '?').charAt(0).toUpperCase())}</span>
+       <span class="account-text"><span class="account-name">${esc(u.email)}</span><span class="account-sub" data-sync-status>${esc(syncText())}</span></span>`
+    : `<span class="avatar" aria-hidden="true">${icon('user')}</span>
+       <span class="account-text"><span class="account-name">Se connecter</span><span class="account-sub">Sauvegarde tes musiques</span></span>`;
+}
+
+// Tri des clés : jsonb ne conserve pas l'ordre, on compare donc sur une forme stable
+function stable(value) {
+  return JSON.stringify(value, (_, v) => (v && typeof v === 'object' && !Array.isArray(v)
+    ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+    : v));
+}
+
+async function applyRemote(rows) {
+  const tracks = [];
+  const playlists = [];
+  const goneTracks = [];
+  const gonePlaylists = [];
+  for (const r of rows) {
+    const isTrack = r.kind === 'track';
+    const map = isTrack ? lib.tracks : lib.playlists;
+    if (r.deleted || !r.data) {
+      if (map.has(r.id)) (isTrack ? goneTracks : gonePlaylists).push(r.id);
+      continue;
+    }
+    const local = map.get(r.id);
+    if (local && stable(local) === stable(r.data)) continue;
+    (isTrack ? tracks : playlists).push(r.data);
+  }
+  if (!tracks.length && !playlists.length && !goneTracks.length && !gonePlaylists.length) return;
+
+  tracks.forEach((t) => lib.tracks.set(t.id, t));
+  playlists.forEach((p) => lib.playlists.set(p.id, p));
+  if (tracks.length) await db.putMany('tracks', tracks);
+  if (playlists.length) await db.putMany('playlists', playlists);
+  if (goneTracks.length) {
+    await db.deleteMany('files', goneTracks.map((id) => lib.tracks.get(id)?.fileKey).filter(Boolean));
+    await db.deleteMany('tracks', goneTracks);
+    goneTracks.forEach((id) => lib.tracks.delete(id));
+  }
+  if (gonePlaylists.length) {
+    await db.deleteMany('playlists', gonePlaylists);
+    gonePlaylists.forEach((id) => lib.playlists.delete(id));
+  }
+  reindex();
+  await fetchMissingCovers();
+  refreshAfterSync();
+}
+
+async function fetchMissingCovers() {
+  const keys = new Set();
+  for (const t of lib.tracks.values()) if (t.coverKey && t.coverCloud && !lib.covers.has(t.coverKey)) keys.add(t.coverKey);
+  for (const key of keys) {
+    const blob = await cloud.downloadCover(key);
+    if (!blob) continue;
+    await db.put('covers', { id: key, blob });
+    lib.covers.set(key, URL.createObjectURL(blob));
+  }
+}
+
+let refreshPending = false;
+function refreshAfterSync() {
+  // On évite de redessiner pendant que l'on tape dans un champ
+  if (document.activeElement?.closest?.('#main input, #main textarea') || sheet.open) {
+    if (!refreshPending) {
+      refreshPending = true;
+      document.addEventListener('focusout', () => { refreshPending = false; setTimeout(refreshAfterSync, 50); }, { once: true });
+    }
+    return;
+  }
+  render({ keepScroll: true });
+  renderPlayer();
+}
+
+cloud.configure({
+  getTrack: (id) => lib.tracks.get(id),
+  getPlaylist: (id) => lib.playlists.get(id),
+  allKeys: () => [...[...lib.tracks.keys()].map((id) => ['track', id]), ...[...lib.playlists.keys()].map((id) => ['playlist', id])],
+  resetCloudFlags: () => {
+    const changed = [];
+    for (const t of lib.tracks.values()) {
+      if (!t.cloudFile && !t.coverCloud && !t.cloudSkip) continue;
+      const next = { ...t, cloudFile: false, coverCloud: false, cloudSkip: undefined };
+      lib.tracks.set(t.id, next);
+      changed.push(next);
+    }
+    if (changed.length) db.putMany('tracks', changed);
+  },
+  tracksToUpload: () => [...lib.tracks.values()].filter((t) => t.fileKey && !t.cloudFile && !t.cloudSkip),
+  coversToUpload: () => [...new Set([...lib.tracks.values()].filter((t) => t.coverKey && !t.coverCloud && lib.covers.has(t.coverKey)).map((t) => t.coverKey))],
+  patchTrack: async (id, patch) => {
+    const t = lib.tracks.get(id);
+    if (t) await saveTrack({ ...t, ...patch });
+  },
+  markCoverUploaded: async (key) => {
+    for (const t of [...lib.tracks.values()]) if (t.coverKey === key && !t.coverCloud) await saveTrack({ ...t, coverCloud: true });
+  },
+  applyRemote,
+  status: onSyncStatus,
+});
+
+function newPasswordSheet() {
+  openSheet('Nouveau mot de passe', `
+    <form class="form" data-form="new-password">
+      <label class="field"><span class="field-label">Choisis un nouveau mot de passe (6 caractères minimum)</span>
+        <input class="input" name="password" type="password" autocomplete="new-password" minlength="6" required></label>
+      <div class="sheet-actions"><button class="btn btn-primary">Enregistrer</button></div>
+    </form>`);
+  $('form', sheet).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await cloud.updatePassword(new FormData(e.target).get('password'));
+      closeSheet();
+      toast('Mot de passe modifié.');
+    } catch (err) { toast(err.message, { error: true }); }
+  });
+}
+
+function onAuth(event, u, previous) {
+  if (event === 'PASSWORD_RECOVERY') newPasswordSheet();
+  if (u && u.id !== previous) {
+    cloud.adoptUser();
+    if (event === 'SIGNED_IN') toast(`Connecté avec ${u.email}. Synchronisation de ta bibliothèque…`, { timeout: 6000 });
+  }
+  if (!u && previous) toast('Déconnecté. Tes musiques restent disponibles sur cet appareil.', { timeout: 6000 });
+  syncState = { state: 'idle' };
+  renderAccountChip();
+  if (currentRoute().name === 'settings') render({ keepScroll: true });
+}
+
+async function initCloud() {
+  if (!cloud.isConfigured()) return;
+  const authHash = location.hash;
+  const fromEmailLink = /access_token=|error_description=/.test(authHash);
+  const u = await cloud.init(onAuth);
+  if (fromEmailLink) {
+    history.replaceState(null, '', `${location.pathname}${location.search}#/settings`);
+    const failure = /error_description=([^&]+)/.exec(authHash);
+    if (failure) toast(`Lien invalide ou expiré : ${decodeURIComponent(failure[1].replace(/\+/g, ' '))}`, { error: true, timeout: 9000 });
+  }
+  renderAccountChip();
+  if (u) cloud.adoptUser();
+  if (fromEmailLink || currentRoute().name === 'settings') render({ keepScroll: !fromEmailLink });
+}
+
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') cloud.schedule(300); });
+window.addEventListener('online', () => cloud.schedule(300));
+setInterval(() => { if (document.visibilityState === 'visible') cloud.schedule(0); }, 60000);
+
 let installPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
@@ -1444,6 +1720,8 @@ async function start() {
     toast(err.message, { error: true, timeout: 8000 });
   }
   render();
+  renderAccountChip();
+  initCloud();
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Service worker', err));
