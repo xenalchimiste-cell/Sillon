@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Sillon</title>
+  <meta name="description" content="Ton lecteur de musique personnel : tes fichiers et tes playlists Deezer ou Spotify, sans pub.">
+  <meta name="theme-color" content="#08070f">
+  <meta name="color-scheme" content="dark">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Sillon">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400..800&family=Instrument+Sans:wdth,wght@75..100,400..700&display=swap">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3.5 10.2 12 3.5l8.5 6.7V20a1 1 0 0 1-1 1H15v-6.5H9V21H4.5a1 1 0 0 1-1-1z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.8-4.8"/></symbol>
+    <symbol id="i-library" viewBox="0 0 24 24"><path d="M5 4v16M10 4v16"/><path d="m14.5 4.6 5 15"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12h8"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M7.5 4.9v14.2a1 1 0 0 0 1.5.86l11.6-7.1a1 1 0 0 0 0-1.72L9 4.04a1 1 0 0 0-1.5.86z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><rect fill="currentColor" stroke="none" x="6" y="4.5" width="4" height="15" rx="1.2"/><rect fill="currentColor" stroke="none" x="14" y="4.5" width="4" height="15" rx="1.2"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M5 5.6v12.8a1 1 0 0 0 1.53.85L15.5 13.6V19a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1h-1a1 1 0 0 0-1 1v5.4L6.53 4.75A1 1 0 0 0 5 5.6z"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M19 5.6v12.8a1 1 0 0 1-1.53.85L8.5 13.6V19a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v5.4l8.97-5.65A1 1 0 0 1 19 5.6z"/></symbol>
+    <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M16 4h4v4M4 19 20 4M20 16v4h-4M14.5 14.5 20 20M4 5l5 5"/></symbol>
+    <symbol id="i-repeat" viewBox="0 0 24 24"><path d="m17 3 3 3-3 3"/><path d="M4 11v-1a4 4 0 0 1 4-4h12"/><path d="m7 21-3-3 3-3"/><path d="M20 13v1a4 4 0 0 1-4 4H4"/></symbol>
+    <symbol id="i-repeat-one" viewBox="0 0 24 24"><path d="m17 3 3 3-3 3"/><path d="M4 11v-1a4 4 0 0 1 4-4h12"/><path d="m7 21-3-3 3-3"/><path d="M20 13v1a4 4 0 0 1-4 4H4"/><path d="M11.5 10.5 13 9.5v5"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20s-7.2-4.4-8.9-9C1.9 7.7 4.1 4.5 7.4 4.5c1.9 0 3.5 1 4.6 2.6 1.1-1.6 2.7-2.6 4.6-2.6 3.3 0 5.5 3.2 4.3 6.5-1.7 4.6-8.9 9-8.9 9z"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle fill="currentColor" stroke="none" cx="5" cy="12" r="1.8"/><circle fill="currentColor" stroke="none" cx="12" cy="12" r="1.8"/><circle fill="currentColor" stroke="none" cx="19" cy="12" r="1.8"/></symbol>
+    <symbol id="i-queue" viewBox="0 0 24 24"><path d="M4 6h12M4 12h12M4 18h7"/><path fill="currentColor" d="m16 15.5 4.5 2.5-4.5 2.5z"/></symbol>
+    <symbol id="i-volume" viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4.2 4.2 0 0 1 0 6M18.5 6a8.5 8.5 0 0 1 0 12"/></symbol>
+    <symbol id="i-mute" viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="m16 9.5 5 5m0-5-5 5"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4.2 4.2 0 0 0 6 0l3-3a4.2 4.2 0 0 0-6-6l-1 1"/><path d="M14 10a4.2 4.2 0 0 0-6 0l-3 3a4.2 4.2 0 0 0 6 6l1-1"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 6.5a1 1 0 0 1 1-1h4.8l2 2h8.2a1 1 0 0 1 1 1v9.5a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/></symbol>
+    <symbol id="i-note" viewBox="0 0 24 24"><path d="M9 17.5V5.8l10-2v11.7"/><circle cx="6.5" cy="17.5" r="2.5"/><circle cx="16.5" cy="15.5" r="2.5"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20.5a7.5 7.5 0 0 1 15 0"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.2"/><path d="M12 7.5v6.5m-2.8-2.8L12 14l2.8-2.8"/></symbol>
+    <symbol id="i-disk" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M10 11v6M14 11v6M6.5 7l.8 12.2a1 1 0 0 0 1 .8h7.4a1 1 0 0 0 1-.8L17.5 7M9.5 7V4.5h5V7"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4.5 19.5h4l10-10-4-4-10 10z"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6L20 8.5"/><path d="M20 3.5v5h-5"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M14.5 4H20v5.5M9.5 20H4v-5.5M20 4l-6.5 6.5M4 20l6.5-6.5"/></symbol>
+  </svg>
+
+  <div class="app">
+    <aside class="sidebar" aria-label="Navigation">
+      <a class="brand" href="#/"><span class="brand-mark" aria-hidden="true"></span>Sillon</a>
+      <nav class="side-nav">
+        <a href="#/" data-nav="home"><svg class="i" aria-hidden="true"><use href="#i-home"/></svg>Accueil</a>
+        <a href="#/search" data-nav="search"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg>Rechercher</a>
+        <a href="#/import" data-nav="import"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg>Ajouter de la musique</a>
+        <a href="#/settings" data-nav="settings"><svg class="i" aria-hidden="true"><use href="#i-sliders"/></svg>Réglages</a>
+      </nav>
+      <div class="side-section">
+        <div class="side-head">
+          <h2 class="side-title">Playlists</h2>
+          <button class="icon-btn" data-action="new-playlist" aria-label="Nouvelle playlist"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg></button>
+        </div>
+        <nav id="side-list" class="side-list" aria-label="Playlists"></nav>
+      </div>
+      <button class="btn btn-ghost side-install" data-action="install"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg>Installer l’app</button>
+    </aside>
+
+    <main id="main" class="main" tabindex="-1"></main>
+
+    <footer id="playerbar" class="playerbar" data-open-np aria-label="Lecteur">
+      <div class="pb-track">
+        <button class="pb-art" data-action="np-open" aria-label="Ouvrir le lecteur"><span class="cover-frame" data-np="art"></span></button>
+        <div class="pb-text">
+          <span class="pb-title" data-np="title"></span>
+          <span class="pb-artist" data-np="artist"></span>
+        </div>
+        <button class="icon-btn like" data-np="like" data-action="like" aria-label="J’aime"><svg class="i" aria-hidden="true"><use href="#i-heart"/></svg></button>
+        <button class="icon-btn pb-mobile-toggle" data-action="toggle" aria-label="Lecture"></button>
+      </div>
+      <div class="pb-center">
+        <div class="pb-controls">
+          <button class="icon-btn" data-action="shuffle" aria-label="Lecture aléatoire"><svg class="i" aria-hidden="true"><use href="#i-shuffle"/></svg></button>
+          <button class="icon-btn" data-action="prev" aria-label="Précédent"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button>
+          <button class="play-btn" data-action="toggle" aria-label="Lecture"></button>
+          <button class="icon-btn" data-action="next" aria-label="Suivant"><svg class="i" aria-hidden="true"><use href="#i-next"/></svg></button>
+          <button class="icon-btn" data-action="repeat" aria-label="Répéter"></button>
+        </div>
+        <div class="pb-progress">
+          <span class="time" data-np="elapsed">0:00</span>
+          <input class="range" type="range" min="0" max="1000" value="0" data-np="seek" aria-label="Position dans le titre">
+          <span class="time" data-np="duration">0:00</span>
+        </div>
+      </div>
+      <div class="pb-right">
+        <span class="mode-badge" data-np="mode" hidden></span>
+        <button class="icon-btn" data-action="mute" aria-label="Couper le son"></button>
+        <input class="range range-volume" type="range" min="0" max="100" data-np="volume" aria-label="Volume">
+        <button class="icon-btn" data-action="np-open" aria-label="Plein écran"><svg class="i" aria-hidden="true"><use href="#i-expand"/></svg></button>
+      </div>
+      <div class="pb-line" data-np="progress" aria-hidden="true"></div>
+    </footer>
+
+    <nav class="tabbar" aria-label="Navigation">
+      <a href="#/" data-nav="home"><svg class="i" aria-hidden="true"><use href="#i-home"/></svg><span>Accueil</span></a>
+      <a href="#/search" data-nav="search"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg><span>Rechercher</span></a>
+      <a href="#/library" data-nav="library"><svg class="i" aria-hidden="true"><use href="#i-library"/></svg><span>Bibliothèque</span></a>
+      <a href="#/import" data-nav="import"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg><span>Ajouter</span></a>
+    </nav>
+  </div>
+
+  <section id="np" class="np" hidden aria-label="Lecture en cours">
+    <div class="np-backdrop" data-np="backdrop" aria-hidden="true"></div>
+    <header class="np-top">
+      <button class="icon-btn" data-action="np-close" aria-label="Réduire le lecteur"><svg class="i" aria-hidden="true"><use href="#i-chevron-down"/></svg></button>
+      <p class="np-context"><span>En lecture depuis</span><strong data-np="context"></strong></p>
+      <button class="icon-btn np-queue-btn" data-action="np-queue" aria-label="File d’attente"><svg class="i" aria-hidden="true"><use href="#i-queue"/></svg></button>
+    </header>
+    <div class="np-body">
+      <div class="np-stage">
+        <div class="np-cover">
+          <span class="np-halo" data-np="halo" aria-hidden="true"></span>
+          <span class="cover-frame" data-np="art"></span>
+        </div>
+      </div>
+      <div class="np-panel">
+        <div class="np-meta">
+          <div class="np-text">
+            <h2 class="np-title" data-np="title"></h2>
+            <p class="np-artist" data-np="artist"></p>
+          </div>
+          <button class="icon-btn icon-btn-lg like" data-np="like" data-action="like" aria-label="J’aime"><svg class="i" aria-hidden="true"><use href="#i-heart"/></svg></button>
+        </div>
+        <div class="np-seek">
+          <input class="range" type="range" min="0" max="1000" value="0" data-np="seek" aria-label="Position dans le titre">
+          <div class="np-times"><span class="time" data-np="elapsed">0:00</span><span class="mode-badge" data-np="mode" hidden></span><span class="time" data-np="duration">0:00</span></div>
+        </div>
+        <div class="np-controls">
+          <button class="icon-btn icon-btn-lg" data-action="shuffle" aria-label="Lecture aléatoire"><svg class="i" aria-hidden="true"><use href="#i-shuffle"/></svg></button>
+          <button class="icon-btn icon-btn-xl" data-action="prev" aria-label="Précédent"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button>
+          <button class="play-btn play-btn-xl" data-action="toggle" aria-label="Lecture"></button>
+          <button class="icon-btn icon-btn-xl" data-action="next" aria-label="Suivant"><svg class="i" aria-hidden="true"><use href="#i-next"/></svg></button>
+          <button class="icon-btn icon-btn-lg" data-action="repeat" aria-label="Répéter"></button>
+        </div>
+        <div class="np-queue">
+          <h3 class="np-queue-title">À suivre</h3>
+          <ol id="np-queue-list" class="queue-list"></ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <dialog id="sheet" class="sheet"></dialog>
+  <div id="toasts" class="toasts"></div>
+  <div class="drop-overlay" aria-hidden="true"><p>Dépose tes fichiers audio pour les ajouter</p></div>
+
+  <input id="file-input" type="file" multiple accept="audio/*,.mp3,.m4a,.aac,.flac,.wav,.ogg,.opus" hidden>
+  <input id="folder-input" type="file" multiple webkitdirectory hidden>
+  <input id="attach-input" type="file" accept="audio/*,.mp3,.m4a,.aac,.flac,.wav,.ogg,.opus" hidden>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
