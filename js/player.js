@@ -463,14 +463,49 @@ export class Player extends EventTarget {
     }
     const a = this.audio;
     if (!a.getAttribute('src') || a.src === this.silentUrl) return this.load();
-    if (a.paused) {
-      clearInterval(a.rampTimer);
-      a.gain = 1;
-      a.volume = this.volume;
-      a.play().catch(() => {});
-    } else {
-      this.spare.pause(); // coupe aussi un fondu en cours
-      a.pause();
+    if (a.paused) this.resume();
+    else this.pauseAudio();
+  }
+
+  pauseAudio() {
+    if (this.engine === 'spotify') return this.remote()?.pause();
+    this.spare.pause(); // coupe aussi un fondu en cours
+    this.audio.pause();
+  }
+
+  // Reprise après pause. L'iPhone refuse parfois de repartir en arrière-plan :
+  // on réessaie, puis on recharge le morceau à la même position.
+  async resume() {
+    if (this.engine === 'spotify') return this.remote()?.resume();
+    const a = this.audio;
+    if (!a.getAttribute('src') || a.src === this.silentUrl) return this.load();
+    clearInterval(a.rampTimer);
+    a.gain = 1;
+    a.volume = this.volume;
+    try {
+      await a.play();
+      return;
+    } catch (err) {
+      if (err.name === 'AbortError' || a !== this.audio) return;
+    }
+    try {
+      await a.play(); // deuxième essai immédiat
+      return;
+    } catch { /* on recharge la source */ }
+    const at = a.currentTime;
+    const source = a.src;
+    await new Promise((done) => {
+      a.addEventListener('loadedmetadata', () => { a.currentTime = at; done(); }, { once: true });
+      a.addEventListener('error', done, { once: true });
+      setTimeout(done, 2000);
+      a.src = source;
+      a.load();
+    });
+    try {
+      await a.play();
+    } catch {
+      this.setPlaying(false);
+      this.emit('blocked');
     }
   }
 
@@ -515,7 +550,7 @@ export class Player extends EventTarget {
   onEnded() {
     if (this.repeat === 'one') {
       this.seek(0);
-      return this.engine === 'audio' ? this.audio.play() : this.remote()?.resume();
+      return this.resume();
     }
     if (this.autoAdvancing) return; // le fondu enchaîné a déjà lancé le suivant
     this.next(true, 'gapless');
@@ -545,8 +580,10 @@ export class Player extends EventTarget {
     if (!('mediaSession' in navigator)) return;
     const ms = navigator.mediaSession;
     const set = (action, fn) => { try { ms.setActionHandler(action, fn); } catch { /* non supporté */ } };
-    set('play', () => this.toggle());
-    set('pause', () => this.toggle());
+    // Actions explicites : un « lecture » ne doit jamais mettre en pause, même si
+    // le téléphone et l'app ne sont plus d'accord sur l'état en cours
+    set('play', () => this.resume());
+    set('pause', () => this.pauseAudio());
     set('previoustrack', () => this.prev());
     set('nexttrack', () => this.next());
     set('seekto', (e) => this.seek(e.seekTime));
