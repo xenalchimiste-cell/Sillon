@@ -64,11 +64,7 @@ export class Player extends EventTarget {
     a.preload = 'auto';
     a.volume = this.volume;
     const isActive = () => a === this.audio && a.src !== this.silentUrl;
-    a.addEventListener('play', () => {
-      if (!isActive()) return;
-      this.setPlaying(true);
-      this.registerMediaActions(); // iOS peut oublier les commandes quand la source change
-    });
+    a.addEventListener('play', () => { if (isActive()) this.setPlaying(true); });
     a.addEventListener('pause', () => { if (isActive()) this.setPlaying(false); });
     a.addEventListener('timeupdate', () => {
       if (!isActive()) return;
