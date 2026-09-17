@@ -12,6 +12,15 @@ const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ESC[c]);
 const icon = (name, cls = '') => `<svg class="i ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const AUDIO_EXT = /\.(mp3|m4a|aac|flac|wav|ogg|oga|opus|webm|aiff?)$/i;
+const AUDIO_MIME = { mp3: 'audio/mpeg', m4a: 'audio/mp4', mp4: 'audio/mp4', aac: 'audio/aac', flac: 'audio/flac', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', webm: 'audio/webm', aif: 'audio/aiff', aiff: 'audio/aiff' };
+const IS_IOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+// Type MIME fiable : les téléchargements et certains sélecteurs de fichiers renvoient un type vide
+function audioType(blob, fileName) {
+  if (blob?.type && blob.type !== 'application/octet-stream') return blob.type;
+  const ext = String(fileName || '').split('.').pop().toLowerCase();
+  return AUDIO_MIME[ext] || 'audio/mpeg';
+}
 const plural = (n, word) => `${n} ${word}${n > 1 ? 's' : ''}`;
 
 function fmt(sec) {
@@ -160,12 +169,28 @@ const player = new Player({
   artFor: coverSrc,
   resolve: async (t) => {
     const fileKey = localFileFor(t);
+    let missing = null;
     if (fileKey) {
+      const owner = [...lib.tracks.values()].find((x) => x.fileKey === fileKey) || t;
       let blob = await db.get('files', fileKey);
       // Fichier sauvegardé dans le compte mais pas encore sur cet appareil
       if (!blob && cloud.currentUser()) {
         blob = await cloud.downloadAudio(fileKey);
-        if (blob) await db.put('files', blob, fileKey).catch(() => {});
+        if (blob) {
+          blob = new Blob([blob], { type: audioType(blob, owner.fileName) });
+          await db.put('files', blob, fileKey).catch(() => {});
+        } else {
+          missing = owner.cloudSkip === 'too-big'
+            ? `« ${t.title} » dépasse 50 Mo : il n’est que sur l’appareil où tu l’as importé.`
+            : `« ${t.title} » n’est pas encore dans ton compte. Ouvre Sillon sur l’appareil où tu l’as importé et attends la fin de l’envoi.`;
+        }
+      } else if (!blob) {
+        missing = `Le fichier de « ${t.title} » n’est pas sur cet appareil. Connecte-toi à ton compte pour le récupérer.`;
+      }
+      if (blob) {
+        const type = audioType(blob, owner.fileName);
+        // Safari lit mal les fichiers servis directement depuis IndexedDB : on passe par une copie en mémoire
+        if (IS_IOS || blob.type !== type) blob = new Blob([await blob.arrayBuffer()], { type });
       }
       if (blob) return { type: 'audio', url: URL.createObjectURL(blob), revoke: true, mode: 'full' };
     }
@@ -182,6 +207,7 @@ const player = new Player({
       }
       if (uri) return { type: 'spotify', uri, via };
     }
+    if (missing) throw new Error(missing);
     return { type: 'skip' };
   },
 });
@@ -859,7 +885,10 @@ player.addEventListener('time', () => {
   if (timeFrame) return;
   timeFrame = requestAnimationFrame(() => { timeFrame = 0; renderTime(); });
 });
-player.addEventListener('error', (e) => toast(e.detail.message, { error: true }));
+player.addEventListener('error', (e) => toast(e.detail.message, { error: true, timeout: 7000 }));
+player.addEventListener('blocked', () => toast('Touche le bouton lecture pour lancer le son.', { timeout: 5000 }));
+// Débloque le son dès le premier toucher (exigence de Safari sur iPhone)
+['pointerdown', 'touchend', 'keydown'].forEach((type) => document.addEventListener(type, () => player.unlock(), { capture: true, passive: true }));
 player.addEventListener('loading', (e) => document.body.classList.toggle('is-loading', e.detail.loading));
 player.addEventListener('volume', renderVolume);
 
@@ -1207,7 +1236,7 @@ async function importFiles(fileList, { playlistId = null, asFolder = false } = {
           lib.covers.set(coverKey, URL.createObjectURL(tags.cover));
         }
       }
-      const blob = new Blob([file], { type: file.type || 'audio/mpeg' });
+      const blob = new Blob([file], { type: audioType(file, file.name) });
       const url = URL.createObjectURL(blob);
       const duration = await probeDuration(url);
       URL.revokeObjectURL(url);
@@ -1307,7 +1336,7 @@ attachInput.addEventListener('change', async () => {
   pendingAttachId = null;
   if (!file || !t) return;
   const fileKey = t.fileKey || `f${t.id}`;
-  await db.put('files', new Blob([file], { type: file.type || 'audio/mpeg' }), fileKey);
+  await db.put('files', new Blob([file], { type: audioType(file, file.name) }), fileKey);
   await saveTrack({ ...t, fileKey, fileName: file.name, fileSize: file.size, cloudFile: false, cloudSkip: undefined });
   reindex();
   toast(`Version complète associée à « ${t.title} ».`);

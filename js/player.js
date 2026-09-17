@@ -2,6 +2,21 @@
 // et le SDK Spotify. Le choix de la source est délégué à `resolve(track)`.
 import * as spotify from './spotify.js';
 
+// Son muet de 0,1 s : sert à « débloquer » le lecteur audio pendant un toucher (iPhone)
+function silentWavUrl() {
+  const rate = 8000;
+  const samples = 800;
+  const buf = new ArrayBuffer(44 + samples);
+  const v = new DataView(buf);
+  const str = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  str(0, 'RIFF'); v.setUint32(4, 36 + samples, true); str(8, 'WAVE'); str(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+  str(36, 'data'); v.setUint32(40, samples, true);
+  for (let i = 0; i < samples; i++) v.setUint8(44 + i, 128);
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
+
 export class Player extends EventTarget {
   constructor({ getTrack, resolve, artFor }) {
     super();
@@ -24,14 +39,21 @@ export class Player extends EventTarget {
     this.audio.volume = this.volume;
 
     const a = this.audio;
-    a.addEventListener('play', () => this.setPlaying(true));
-    a.addEventListener('pause', () => this.setPlaying(false));
-    a.addEventListener('timeupdate', () => this.emit('time'));
-    a.addEventListener('durationchange', () => this.emit('time'));
-    a.addEventListener('ended', () => this.onEnded());
+    this.silentUrl = silentWavUrl();
+    const isSilent = () => a.src === this.silentUrl;
+    a.addEventListener('play', () => { if (!isSilent()) this.setPlaying(true); });
+    a.addEventListener('pause', () => { if (!isSilent()) this.setPlaying(false); });
+    a.addEventListener('timeupdate', () => { if (!isSilent()) this.emit('time'); });
+    a.addEventListener('durationchange', () => { if (!isSilent()) this.emit('time'); });
+    a.addEventListener('ended', () => { if (!isSilent()) this.onEnded(); });
     a.addEventListener('error', () => {
-      if (this.engine !== 'audio' || !a.getAttribute('src')) return;
-      this.emit('error', { message: 'Impossible de lire ce titre.' });
+      if (this.engine !== 'audio' || !a.getAttribute('src') || isSilent()) return;
+      const unsupported = a.error?.code === 4;
+      this.emit('error', {
+        message: unsupported
+          ? 'Ce format audio n’est pas lu par ce navigateur. Sur iPhone, préfère le MP3 ou le M4A (le FLAC, l’OGG et l’Opus ne passent pas partout).'
+          : 'Impossible de lire ce titre.',
+      });
       this.skipAfterError();
     });
 
@@ -40,6 +62,20 @@ export class Player extends EventTarget {
   }
 
   emit(type, detail) { this.dispatchEvent(new CustomEvent(type, { detail })); }
+
+  // À appeler pendant un toucher : Safari n'autorise ensuite la lecture sur cet élément
+  // même si le fichier met du temps à être prêt (lecture en mémoire, téléchargement).
+  unlock() {
+    const a = this.audio;
+    if (this.unlocked || this.unlocking) return;
+    if (a.getAttribute('src') && a.src !== this.silentUrl) return;
+    this.unlocking = true;
+    a.src = this.silentUrl;
+    a.play()
+      .then(() => { this.unlocked = true; })
+      .catch(() => {}) // pas un geste valable (ex. début d'un toucher) : on réessaiera au suivant
+      .finally(() => { this.unlocking = false; });
+  }
 
   get current() { return this.pos >= 0 ? this.getTrack(this.queue[this.order[this.pos]]) : null; }
   get upcoming() { return this.order.slice(this.pos + 1).map((i) => this.queue[i]); }
@@ -126,17 +162,19 @@ export class Player extends EventTarget {
     this.emit('change');
     this.emit('loading', { loading: true });
     let source;
+    let failure = null;
     try {
       source = await this.resolve(track);
     } catch (err) {
       source = null;
+      failure = err.message;
       console.warn(err);
     }
     if (token !== this.loadingToken) return;
     this.emit('loading', { loading: false });
 
     if (!source) {
-      this.emit('error', { message: `Aucune source pour « ${track.title} ».` });
+      this.emit('error', { message: failure || `Aucune source pour « ${track.title} ».` });
       return this.skipAfterError();
     }
     // Titre sans version complète disponible : on passe au suivant
@@ -184,7 +222,13 @@ export class Player extends EventTarget {
       this.audio.src = source.url;
       if (autoplay) {
         try { await this.audio.play(); } catch (err) {
-          if (err.name !== 'AbortError') this.setPlaying(false);
+          if (err.name === 'NotAllowedError') {
+            // Le navigateur exige un toucher : le titre est prêt, il suffit d'appuyer sur lecture
+            this.setPlaying(false);
+            this.emit('blocked');
+          } else if (err.name !== 'AbortError') {
+            this.setPlaying(false);
+          }
         }
       }
     }

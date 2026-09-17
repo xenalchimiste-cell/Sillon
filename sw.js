@@ -1,5 +1,5 @@
 // Service worker : app disponible hors ligne + cache des polices et pochettes.
-const VERSION = 'sillon-v6';
+const VERSION = 'sillon-v7';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/db.js', 'js/tags.js', 'js/player.js', 'js/deezer.js', 'js/spotify.js', 'js/cloud.js', 'js/config.js',
